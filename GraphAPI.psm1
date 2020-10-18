@@ -210,7 +210,7 @@ function Request-Token(){
       $script:SessionToken = ($theRequest.Content | ConvertFrom-Json).access_token
       
       #Get TOken Epxiry Time
-      $aTokenData = $script:SessionToken.Split('.')[1].Replace('-', '+').Replace('_', '/') + "=="
+      $aTokenData = $script:SessionToken.Split('.')[1].Replace('-', '+').Replace('_', '/').Replace('\n\r','')
       $aUnixTime = ([System.Text.Encoding]::UTF8.GetString([convert]::FromBase64String($aTokenData))|Convertfrom-Json).exp
       $Script:SessionExpiry = [timezone]::CurrentTimeZone.ToLocalTime(([datetime]'1/1/1970').AddSeconds($aUnixTime))
       
@@ -240,6 +240,7 @@ function Request-Token(){
 function Get-APIMethod() {
   Param(
     [Parameter(Mandatory=$true ,ValueFromPipeline=$true)][String]$aURI,
+    [Parameter(Mandatory=$false,ValueFromPipeline=$false)][String]$aLimit,
     [Parameter(Mandatory=$false,ValueFromPipeline=$false)][AllowNull()][String]$aFolder
   )
 
@@ -248,8 +249,16 @@ function Get-APIMethod() {
   $theJSON = $null
 
   #Construct the URI to call
-  $theURI = ('https://graph.microsoft.com/v1.0/{0}' -f $aURI)
+  $theURI = ('https://graph.microsoft.com/{0}/{1}' -f $script:gAPIVersion,$aURI)
   
+  #Add limits
+  if($aLimit){
+    $theURI = $theURI.replace('?',('?$top={0}&' -f $aLimit))
+  }
+
+  #Write Debugging output of the URI to be called
+  write-debug ("URI: {0}" -f $theURI)
+
   #Check if the token is valid
   if(Request-Token){ 
     do{ #a loop to get all results
@@ -257,7 +266,9 @@ function Get-APIMethod() {
       #Initialize variables
       $theReturnValue = $null
       $theJSON = $null
-      
+
+      $theReturnValue = Invoke-WebRequest -Method Get -Uri $theURI -ContentType 'application/json' -Headers @{Authorization = "Bearer $script:SessionToken"} -ErrorAction Stop
+<#
       try{ #Running the Graph API query
         $theReturnValue = Invoke-WebRequest -Method Get -Uri $theURI -ContentType 'application/json' -Headers @{Authorization = "Bearer $script:SessionToken"} -ErrorAction Stop
       } catch {
@@ -265,11 +276,18 @@ function Get-APIMethod() {
         return $null
         end
       }
-    
+#>    
+      #Add content to results
       $theJSON = ($theReturnValue.content |ConvertFrom-Json)
       $theResults += $theJSON.value
-      If($theURI -match 'top'){$theURI = $null}else{$theUri = $theJSON."@odata.nextlink"}
-      
+
+      #Check if there is more data to read
+      If($theJSON."@odata.nextlink"){$theUri = $theJSON."@odata.nextlink"}else{$theURI = $null}
+
+      #Check if we have reached the limit
+      If($aLimit){
+        If($theResults.count -ge $aLimit){$theURI = $null}
+      }
     } until (-not $theURI)
   }
 
@@ -299,24 +317,31 @@ function Get-APIMethod() {
 #
 function Get-GraphUsers(){
   Param(
-    [Parameter(Mandatory=$true,  ParameterSetName= 'Count', ValueFromPipeline=$false)][switch]$Count,
-    [Parameter(Mandatory=$false, ParameterSetName= 'Get'  , ValueFromPipeline=$false)][String]$Limit = '100',
-    [Parameter(Mandatory=$false, ParameterSetName= 'Get'  , ValueFromPipeline=$false)][AllowNull()][String]$Folder
+    [Parameter(Mandatory=$false, ValueFromPipeline=$false)][switch]$Count = $false,
+    [Parameter(Mandatory=$false, ValueFromPipeline=$false)][AllowNull()][String]$Limit,
+    [Parameter(Mandatory=$false, ValueFromPipeline=$false)][AllowNull()][String]$Select,
+    [Parameter(Mandatory=$false, ValueFromPipeline=$false)][AllowNull()][String]$Filter,
+    [Parameter(Mandatory=$false, ValueFromPipeline=$false)][AllowNull()][String]$Folder
   )
 
-  #Get Users information
+  #Setup URI & Command
+  $theURI = ("users?`$select={0}&`$filter={1}" -f $Select,$Filter)
+  $GetAPIMethod = "Get-APIMethod -aURI `$theURI"
+
+  #Add Limit
   If($Limit){
-    $theURI = ("users?`$top={0}" -f $Limit)
-  }else{
-    $theURI = ("users")
+    $GetAPIMethod += " -aLimit `$Limit"  
   }
 
+  #Add Folder
   If($Folder){
-    $Output = Get-APIMethod -aURI $theURI -aFolder $Folder
-  }else{
-    $Output = Get-APIMethod -aURI $theURI
+    $GetAPIMethod += " -aFolder `$Folder"
   }
-  
+
+  #Get User Info
+  $Output = Invoke-Expression $GetAPIMethod
+
+  #Return requested output
   If($Count){
     return $Output.count
   }else{
@@ -331,14 +356,36 @@ function Get-GraphUsers(){
 #
 function Get-GraphDeviceConfigs(){
   Param(
-    [Parameter(Mandatory=$false, ValueFromPipeline=$false)][String]$Limit = '100',
+    [Parameter(Mandatory=$false, ValueFromPipeline=$false)][switch]$Count = $false,
+    [Parameter(Mandatory=$false, ValueFromPipeline=$false)][String]$Limit,
+    [Parameter(Mandatory=$false, ValueFromPipeline=$false)][AllowNull()][String]$Select,
     [Parameter(Mandatory=$false, ValueFromPipeline=$false)][AllowNull()][String]$Folder
   )
 
-  #Get Device Configurations
-  $theURI = ("deviceManagement/deviceConfigurations?`$top={0}" -f $Limit)
-  If($Folder){Get-APIMethod $theURI, $Folder}else{Get-APIMethod $theURI}
+  #Setup URI & Command
+  $theURI = ("deviceManagement/deviceConfigurations?`$select={0}&`$filter={1}" -f $Select,$Filter)
+  $GetAPIMethod = "Get-APIMethod -aURI `$theURI"
 
+  #Add Limit
+  If($Limit){
+    $GetAPIMethod += " -aLimit `$Limit"  
+  }
+
+  #Add Folder
+  If($Folder){
+    $GetAPIMethod += " -aFolder `$Folder"
+  }
+
+  #Get Device Configurations
+  $Output = Invoke-Expression $GetAPIMethod
+
+  #Return requested output
+  If($Count){
+    return $Output.count
+  }else{
+    return $Output
+  }
+  
 }#endregion Get-GraphDeviceConfigs
 
 
@@ -358,6 +405,43 @@ function Get-GraphAIPPolicies(){
 }#endregion Get-GraphAIPPolicies
 
 
+#region Get-GraphAPI
+#
+function Get-GraphAPI(){
+  Param(
+    [Parameter(Mandatory=$true, ValueFromPipeline=$false)][string]$URI,
+    [Parameter(Mandatory=$false, ValueFromPipeline=$false)][String]$Limit,
+    [Parameter(Mandatory=$false, ValueFromPipeline=$false)][AllowNull()][String]$Folder
+  )
+
+  #Setup URI
+  $theURI = ("{0}" -f $URI)
+
+  #Setup Command
+  $GetAPIMethod = "Get-APIMethod -aURI `$theURI"
+
+  #Add Limit
+  If($Limit){
+    $GetAPIMethod += " -aLimit `$Limit"  
+  }
+
+  #Add Folder
+  If($Folder){
+    $GetAPIMethod += " -aFolder `$Folder"
+  }
+
+  #Get User Info
+  $Output = Invoke-Expression $GetAPIMethod
+
+  #Return requested output
+  If($Count){
+    return $Output.count
+  }else{
+    return $Output
+  }
+ 
+
+}#endregion Get-GraphAPI
 
 <############################################# Export Functions #############################################>
 #Sets & Gets
@@ -374,4 +458,4 @@ Export-ModuleMember -Function Get-ApplicationSecret
 Export-ModuleMember -Function Get-GraphUsers
 Export-ModuleMember -Function Get-GraphDeviceConfigs
 Export-ModuleMember -Function Get-GraphAIPPolicies
-
+Export-ModuleMember -Function Get-GraphAPI
