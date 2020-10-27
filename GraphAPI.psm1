@@ -50,7 +50,7 @@ $script:gAPIVersion = 'v1.0'
 #Testing TO BE DELETED
 $script:gSessionTenant = 'generatione.onmicrosoft.com' #"70def4a1-688c-4890-9d1c-3f854ac0ba68"
 $script:gApplicationID = 'bf09db13-cbf5-48c1-b720-7c5de5ca7373'
-$script:gAppSecret     = 'pVjCgH]@19]f7E:fyfOuMpkAY525m[/K'
+$script:gAppSecret     = '9XXwXnga8vKd1UH3W.OV-M6Lu3i~r~_9H4'
 
 
 
